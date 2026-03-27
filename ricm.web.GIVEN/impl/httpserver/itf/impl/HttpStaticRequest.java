@@ -23,6 +23,9 @@ public class HttpStaticRequest extends HttpRequest {
 	
 	    if (filename.equals("/")) {
 	        filename = "/" + DEFAULT_FILE;
+	    } else if (filename.endsWith("/")) {
+	    	// STEP1: when the URL targets a directory (/FILES/), serve its index.html.
+	    	filename = filename + DEFAULT_FILE;
 	    }
 
 	 
@@ -34,6 +37,10 @@ public class HttpStaticRequest extends HttpRequest {
 	    String fullpath = m_hs.getFolder() + "/" + filename;
 
 	    java.io.File file = new java.io.File(fullpath);
+	    if (file.exists() && file.isDirectory()) {
+	    	// STEP1: allow requesting a directory without trailing '/'.
+	    	file = new java.io.File(fullpath + "/" + DEFAULT_FILE);
+	    }
 
 	    // Si fichier existe
 	    if (file.exists() && file.isFile()) {
