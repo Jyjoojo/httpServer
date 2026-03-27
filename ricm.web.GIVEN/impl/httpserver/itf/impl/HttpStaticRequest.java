@@ -61,18 +61,8 @@ public class HttpStaticRequest extends HttpRequest {
 	        fis.close();
 
 	    } else {
-
-	        // 404
+	        // 404 - setReplyError s'occupe de générer toute la réponse HTTP (en-têtes + page HTML d'erreur)
 	        resp.setReplyError(404, "File not found");
-
-	        resp.setContentType("text/plain");
-
-	        String msg = "404 File not found";
-
-	        resp.setContentLength(msg.length());
-
-	        java.io.PrintStream out = resp.beginBody();
-	        out.print(msg);
 	    }
 	}
 
