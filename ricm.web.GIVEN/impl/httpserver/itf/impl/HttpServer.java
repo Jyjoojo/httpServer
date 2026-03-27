@@ -8,6 +8,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.net.MalformedURLException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.StringTokenizer;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -75,9 +77,12 @@ public class HttpServer {
 		int qmarkIdx = ressname.indexOf('?');
 		if (qmarkIdx >= 0) pathOnly = ressname.substring(0, qmarkIdx);
 
+		Map<String, String> headers = readHeaders(br);
+		String cookieHeader = headers.get("cookie");
+
 		if (method.equals("GET")) {
 			if (isRicmletRequest(pathOnly)) {
-				request = new HttpRicmletRequestImpl(this, method, ressname, br);
+				request = new HttpRicmletRequestImpl(this, method, ressname, cookieHeader, br);
 			} else {
 				request = new HttpStaticRequest(this, method, pathOnly);
 			}
@@ -104,6 +109,20 @@ public class HttpServer {
 			System.out.println("HttpServer Exception, skipping request");
 			e.printStackTrace();
 		}
+	}
+
+	private Map<String, String> readHeaders(BufferedReader br) throws IOException {
+		Map<String, String> headers = new HashMap<>();
+		String line;
+		while ((line = br.readLine()) != null) {
+			if (line.isEmpty()) break;
+			int colonIdx = line.indexOf(':');
+			if (colonIdx <= 0) continue;
+			String name = line.substring(0, colonIdx).trim().toLowerCase();
+			String value = line.substring(colonIdx + 1).trim();
+			headers.put(name, value);
+		}
+		return headers;
 	}
 
 	private static boolean isRicmletRequest(String pathOnly) {

@@ -17,11 +17,13 @@ import httpserver.itf.HttpSession;
 class HttpRicmletRequestImpl extends HttpRicmletRequest {
 
 	private final Map<String, String> m_args = new HashMap<>();
+	private final Map<String, String> m_cookies = new HashMap<>();
 	private final List<String> m_candidateRicmletClassNames = new ArrayList<>();
 
-	HttpRicmletRequestImpl(HttpServer hs, String method, String ressname, BufferedReader br) throws IOException {
+	HttpRicmletRequestImpl(HttpServer hs, String method, String ressname, String cookieHeader, BufferedReader br) throws IOException {
 		super(hs, method, ressname, br);
 		parseArgsAndRicmletTarget(ressname);
+		parseCookies(cookieHeader);
 	}
 
 	private void parseArgsAndRicmletTarget(String ressname) {
@@ -59,6 +61,20 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 		m_candidateRicmletClassNames.add(asClass);
 	}
 
+	private void parseCookies(String cookieHeader) {
+		if (cookieHeader == null || cookieHeader.isEmpty()) return;
+		String[] parts = cookieHeader.split(";");
+		for (String part : parts) {
+			String trimmed = part.trim();
+			if (trimmed.isEmpty()) continue;
+			int eqIdx = trimmed.indexOf('=');
+			if (eqIdx <= 0) continue;
+			String name = trimmed.substring(0, eqIdx).trim();
+			String value = trimmed.substring(eqIdx + 1).trim();
+			m_cookies.put(name, value);
+		}
+	}
+
 	private static String urlDecode(String value) {
 		if (value == null) return null;
 		try {
@@ -80,7 +96,7 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 
 	@Override
 	public String getCookie(String name) {
-		return null;
+		return m_cookies.get(name);
 	}
 
 	@Override
