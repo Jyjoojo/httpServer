@@ -33,17 +33,25 @@ public class HttpServer {
 
 	private int m_port;
 	private File m_folder;  // default folder for accessing static resources (files)
+	private final File m_appsFolder;
 	private ServerSocket m_ssoc;
 	// In-memory session store, shared across requests.
 	private final ConcurrentHashMap<String, HttpSessionImpl> m_sessions = new ConcurrentHashMap<>();
 	// Ricmlet singleton lifecycle: max one instance per ricmlet class.
 	private final ConcurrentHashMap<String, HttpRicmlet> m_ricmletInstances = new ConcurrentHashMap<>();
+	// Applications loaded from jar files (one classloader per app).
+	private final ConcurrentHashMap<String, Application> m_apps = new ConcurrentHashMap<>();
 
 	protected HttpServer(int port, String folderName) {
 		m_port = port;
 		if (!folderName.endsWith(File.separator)) 
 			folderName = folderName + File.separator;
 		m_folder = new File(folderName);
+		m_appsFolder = new File(m_folder, "apps");
+		if (!m_appsFolder.exists()) {
+			// Best effort: folder may be created later by the user.
+			m_appsFolder.mkdirs();
+		}
 		try {
 			m_ssoc=new ServerSocket(m_port);
 			System.out.println("HttpServer started on port " + m_port);
@@ -55,6 +63,10 @@ public class HttpServer {
 	
 	public File getFolder() {
 		return m_folder;
+	}
+	
+	public File getAppsFolder() {
+		return m_appsFolder;
 	}
 	
 	
@@ -77,6 +89,27 @@ public class HttpServer {
 		} catch (ReflectiveOperationException e) {
 			throw new InvocationTargetException(e);
 		}
+	}
+	
+	public HttpRicmlet getInstance(String clsname, String appName)
+			throws InstantiationException, IllegalAccessException, ClassNotFoundException, MalformedURLException,
+			IllegalArgumentException, InvocationTargetException, NoSuchMethodException, SecurityException, IOException {
+		if (appName == null || appName.isEmpty()) return getInstance(clsname);
+		Application app = getOrLoadApplication(appName);
+		return app.getRicmletInstance(clsname);
+	}
+
+	private Application getOrLoadApplication(String appName) throws IOException, MalformedURLException {
+		Application existing = m_apps.get(appName);
+		if (existing != null) return existing;
+
+		File jar = new File(m_appsFolder, appName + ".jar");
+		if (!jar.exists()) {
+			throw new IOException("Application jar not found: " + jar.getAbsolutePath());
+		}
+		Application created = new Application(appName, jar, this.getClass().getClassLoader());
+		Application previous = m_apps.putIfAbsent(appName, created);
+		return previous != null ? previous : created;
 	}
 
 
@@ -103,8 +136,9 @@ public class HttpServer {
 		String cookieHeader = headers.get("cookie");
 
 		if (method.equals("GET")) {
-			if (isRicmletRequest(pathOnly)) {
-				request = new HttpRicmletRequestImpl(this, method, ressname, cookieHeader, br);
+			String appName = extractAppNameFromPath(pathOnly);
+			if (isRicmletRequest(pathOnly) || appName != null) {
+				request = new HttpRicmletRequestImpl(this, method, ressname, cookieHeader, br, appName);
 			} else {
 				// Static requests should not include query string in filename lookup.
 				request = new HttpStaticRequest(this, method, pathOnly);
@@ -173,7 +207,27 @@ public class HttpServer {
 
 	private static boolean isRicmletRequest(String pathOnly) {
 		if (pathOnly == null) return false;
-		return pathOnly.startsWith("/ricmlets") || pathOnly.equals("ricmlets");
+		return pathOnly.startsWith("/ricmlets") || pathOnly.equals("ricmlets")
+				|| pathOnly.startsWith("/ricmlet/") || pathOnly.equals("ricmlet");
+	}
+
+	// Supports TP routing:
+	// - /ricmlet/<appName>/<RicmletClassName>
+	// - /<appName>/<RicmletClassName>   (optional, matches the second example in the statement)
+	private String extractAppNameFromPath(String pathOnly) {
+		if (pathOnly == null) return null;
+		String p = pathOnly;
+		if (p.startsWith("/")) p = p.substring(1);
+		if (p.isEmpty()) return null;
+
+		String[] parts = p.split("/");
+		if (parts.length < 2) return null;
+		if ("ricmlet".equals(parts[0])) {
+			return parts[1];
+		}
+		// If "<app>.jar" exists in apps folder, accept "/<app>/<ricmlet>".
+		File jar = new File(m_appsFolder, parts[0] + ".jar");
+		return jar.exists() ? parts[0] : null;
 	}
 
 	HttpSessionImpl getSession(String id) {

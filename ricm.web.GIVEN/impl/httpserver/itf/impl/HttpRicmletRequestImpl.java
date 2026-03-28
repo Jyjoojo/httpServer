@@ -20,12 +20,14 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 	private final Map<String, String> m_args = new HashMap<>();
 	private final Map<String, String> m_cookies = new HashMap<>();
 	private final List<String> m_candidateRicmletClassNames = new ArrayList<>();
+	private final String m_appName;
 
 	private HttpRicmletResponse m_responseForSessionCookies;
 	private boolean m_sessionCookieSent = false;
 
-	HttpRicmletRequestImpl(HttpServer hs, String method, String ressname, String cookieHeader, BufferedReader br) throws IOException {
+	HttpRicmletRequestImpl(HttpServer hs, String method, String ressname, String cookieHeader, BufferedReader br, String appName) throws IOException {
 		super(hs, method, ressname, br);
+		m_appName = appName;
 		parseArgsAndRicmletTarget(ressname);
 		parseCookies(cookieHeader);
 	}
@@ -56,14 +58,32 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 	private void parseRicmletClassCandidates(String pathPart) {
 		String p = pathPart;
 		if (p.startsWith("/")) p = p.substring(1);
+		m_candidateRicmletClassNames.clear();
+
+		// TP URL scheme for applications:
+		// - /ricmlet/<appName>/<RicmletClassName>
+		// - /<appName>/<RicmletClassName>  (optional second scheme in statement)
+		if (m_appName != null) {
+			String[] parts = p.split("/");
+			if (parts.length >= 2 && "ricmlet".equals(parts[0])) {
+				// ricmlet/<app>/<class>
+				if (parts.length >= 3) {
+					m_candidateRicmletClassNames.add(parts[2]);
+				}
+				return;
+			}
+			// <app>/<class>
+			if (parts.length >= 2) {
+				m_candidateRicmletClassNames.add(parts[1]);
+			}
+			return;
+		}
+
+		// Original scheme: /ricmlets/<package>/<RicmletClassName>
 		if (p.startsWith("ricmlets/")) p = p.substring("ricmlets/".length());
 		if (p.equals("ricmlets")) p = "";
 		if (p.isEmpty()) return;
-
-		// STEP2 URL scheme: /ricmlets/<package>/<RicmletClassName>
-		// Example: /ricmlets/examples/HelloRicmlet -> examples.HelloRicmlet
 		String asClass = p.replace('/', '.');
-		m_candidateRicmletClassNames.clear();
 		m_candidateRicmletClassNames.add(asClass);
 	}
 
@@ -128,7 +148,7 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 		HttpRicmlet ricmlet = null;
 		for (String cls : m_candidateRicmletClassNames) {
 			try {
-				ricmlet = m_hs.getInstance(cls);
+				ricmlet = m_hs.getInstance(cls, m_appName);
 				break;
 			} catch (Exception e) {
 			}
