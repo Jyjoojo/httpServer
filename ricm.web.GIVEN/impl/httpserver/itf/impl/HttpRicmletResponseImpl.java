@@ -19,6 +19,7 @@ class HttpRicmletResponseImpl extends HttpResponseImpl implements HttpRicmletRes
 
 	@Override
 	public void setCookie(String name, String value) {
+		// Store cookie headers until the start-line is written.
 		String cookie = name + "=" + value + "; path=/";
 		if (m_replyStarted) {
 			m_ps.println("Set-Cookie: " + cookie);

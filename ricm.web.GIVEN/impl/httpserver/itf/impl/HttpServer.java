@@ -1,5 +1,4 @@
 package httpserver.itf.impl;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -10,6 +9,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.StringTokenizer;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -18,11 +18,25 @@ import httpserver.itf.HttpResponse;
 import httpserver.itf.HttpRicmlet;
 import httpserver.itf.HttpRicmletRequest;
 
+
+/**
+ * Basic HTTP Server Implementation 
+ * 
+ * Only manages static requests
+ * The url for a static ressource is of the form: "http//host:port/<path>/<ressource name>"
+ * For example, try accessing the following urls from your brower:
+ *    http://localhost:<port>/
+ *    http://localhost:<port>/voile.jpg
+ *    ...
+ */
 public class HttpServer {
 
 	private int m_port;
-	private File m_folder; 
+	private File m_folder;  // default folder for accessing static resources (files)
 	private ServerSocket m_ssoc;
+	// In-memory session store, shared across requests.
+	private final ConcurrentHashMap<String, HttpSessionImpl> m_sessions = new ConcurrentHashMap<>();
+	// Ricmlet singleton lifecycle: max one instance per ricmlet class.
 	private final ConcurrentHashMap<String, HttpRicmlet> m_ricmletInstances = new ConcurrentHashMap<>();
 
 	protected HttpServer(int port, String folderName) {
@@ -42,6 +56,8 @@ public class HttpServer {
 	public File getFolder() {
 		return m_folder;
 	}
+	
+	
 
 	public HttpRicmlet getInstance(String clsname)
 			throws InstantiationException, IllegalAccessException, ClassNotFoundException, MalformedURLException, 
@@ -63,6 +79,12 @@ public class HttpServer {
 		}
 	}
 
+
+
+
+	/*
+	 * Reads a request on the given input stream and returns the corresponding HttpRequest object
+	 */
 	public HttpRequest getRequest(BufferedReader br) throws IOException {
 		HttpRequest request = null;
 		
@@ -84,14 +106,18 @@ public class HttpServer {
 			if (isRicmletRequest(pathOnly)) {
 				request = new HttpRicmletRequestImpl(this, method, ressname, cookieHeader, br);
 			} else {
+				// Static requests should not include query string in filename lookup.
 				request = new HttpStaticRequest(this, method, pathOnly);
 			}
-		} else {
+		} else 
 			request = new UnknownRequest(this, method, ressname);
-		}
 		return request;
 	}
 
+
+	/*
+	 * Returns an HttpResponse object associated to the given HttpRequest object
+	 */
 	public HttpResponse getResponse(HttpRequest req, PrintStream ps) {
 		if (req instanceof HttpRicmletRequest) {
 			return new HttpRicmletResponseImpl(this, req, ps);
@@ -99,6 +125,10 @@ public class HttpServer {
 		return new HttpResponseImpl(this, req, ps);
 	}
 
+
+	/*
+	 * Server main loop
+	 */
 	protected void loop() {
 		try {
 			while (true) {
@@ -111,6 +141,8 @@ public class HttpServer {
 		}
 	}
 
+
+	// Consume HTTP headers until the blank line.
 	private Map<String, String> readHeaders(BufferedReader br) throws IOException {
 		Map<String, String> headers = new HashMap<>();
 		String line;
@@ -125,10 +157,51 @@ public class HttpServer {
 		return headers;
 	}
 
+	private static boolean isStaticResource(String pathOnly) {
+		if (pathOnly == null || pathOnly.isEmpty() || pathOnly.equals("/")) return true;
+		String p = pathOnly;
+		if (p.startsWith("/")) p = p.substring(1);
+		String name = p;
+		int slashIdx = p.lastIndexOf('/');
+		if (slashIdx >= 0) name = p.substring(slashIdx + 1);
+		String lower = name.toLowerCase();
+		// Keep the list aligned with HttpRequest#getContentType.
+		return lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".txt") || lower.endsWith(".gif")
+				|| lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".pdf")
+				|| lower.endsWith(".css") || lower.endsWith(".js") || lower.endsWith(".class") || lower.endsWith(".java");
+	}
+
 	private static boolean isRicmletRequest(String pathOnly) {
 		if (pathOnly == null) return false;
 		return pathOnly.startsWith("/ricmlets") || pathOnly.equals("ricmlets");
 	}
+
+	HttpSessionImpl getSession(String id) {
+		if (id == null) return null;
+		HttpSessionImpl s = m_sessions.get(id);
+		if (s == null) return null;
+		// Lazy destruction on access: if the session was idle for too long, remove it.
+		long now = System.currentTimeMillis();
+		if (s.isExpired(now, SESSION_TIMEOUT_MS)) {
+			m_sessions.remove(id);
+			return null;
+		}
+		s.touch(now);
+		return s;
+	}
+
+	String newSessionId() {
+		return UUID.randomUUID().toString();
+	}
+
+	HttpSessionImpl createSession(String id) {
+		HttpSessionImpl session = new HttpSessionImpl(id);
+		HttpSessionImpl previous = m_sessions.putIfAbsent(id, session);
+		return previous != null ? previous : session;
+	}
+
+	// Session inactivity timeout (STEP4). The PDF does not specify a value, so we keep a reasonable default.
+	private static final long SESSION_TIMEOUT_MS = 10L * 60L * 1000L;
 
 	public static void main(String[] args) {
 		int port = 0;
@@ -141,4 +214,5 @@ public class HttpServer {
 			hs.loop();
 		}
 	}
+
 }

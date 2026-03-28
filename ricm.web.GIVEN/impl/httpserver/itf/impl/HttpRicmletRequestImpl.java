@@ -15,10 +15,14 @@ import httpserver.itf.HttpResponse;
 import httpserver.itf.HttpSession;
 
 class HttpRicmletRequestImpl extends HttpRicmletRequest {
+	private static final String SESSION_COOKIE_NAME = "session-id";
 
 	private final Map<String, String> m_args = new HashMap<>();
 	private final Map<String, String> m_cookies = new HashMap<>();
 	private final List<String> m_candidateRicmletClassNames = new ArrayList<>();
+
+	private HttpRicmletResponse m_responseForSessionCookies;
+	private boolean m_sessionCookieSent = false;
 
 	HttpRicmletRequestImpl(HttpServer hs, String method, String ressname, String cookieHeader, BufferedReader br) throws IOException {
 		super(hs, method, ressname, br);
@@ -56,6 +60,8 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 		if (p.equals("ricmlets")) p = "";
 		if (p.isEmpty()) return;
 
+		// STEP2 URL scheme: /ricmlets/<package>/<RicmletClassName>
+		// Example: /ricmlets/examples/HelloRicmlet -> examples.HelloRicmlet
 		String asClass = p.replace('/', '.');
 		m_candidateRicmletClassNames.clear();
 		m_candidateRicmletClassNames.add(asClass);
@@ -77,16 +83,33 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 
 	private static String urlDecode(String value) {
 		if (value == null) return null;
+		// Java 8 does not support URLDecoder#decode(String, Charset) in all environments.
 		try {
 			return URLDecoder.decode(value, "UTF-8");
 		} catch (java.io.UnsupportedEncodingException e) {
+			// Should never happen since UTF-8 is always supported.
 			return value;
 		}
 	}
 
 	@Override
 	public HttpSession getSession() {
-		return null;
+		String sessionId = getCookie(SESSION_COOKIE_NAME);
+		boolean needToSetCookie = false;
+
+		HttpSession s = m_hs.getSession(sessionId);
+		if (sessionId == null || s == null) {
+			needToSetCookie = true;
+			if (sessionId == null) sessionId = m_hs.newSessionId();
+			s = m_hs.createSession(sessionId);
+		}
+
+		if (needToSetCookie && !m_sessionCookieSent && m_responseForSessionCookies != null) {
+			m_responseForSessionCookies.setCookie(SESSION_COOKIE_NAME, sessionId);
+			m_sessionCookieSent = true;
+		}
+
+		return s;
 	}
 
 	@Override
@@ -101,6 +124,7 @@ class HttpRicmletRequestImpl extends HttpRicmletRequest {
 
 	@Override
 	public void process(HttpResponse resp) throws Exception {
+		m_responseForSessionCookies = (HttpRicmletResponse) resp;
 		HttpRicmlet ricmlet = null;
 		for (String cls : m_candidateRicmletClassNames) {
 			try {
